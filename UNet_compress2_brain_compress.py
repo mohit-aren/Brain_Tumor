@@ -406,6 +406,69 @@ batch_size = 2
 #test_data, test_label = prep_data1('test')
 test_data, test_label = val_data, val_label
 
+def enure_binary(x):
+    y = []
+    for indx in range(0, len(x)):
+        if(x[indx] < 0.5):
+            y.append(0)
+        else:
+            y.append(1)
+            
+    return y
+            
+            
+num_dimensions = 4096
+        # print final results
+class Particle:
+    def __init__(self,x0):
+        self.position_i=[]          # particle position
+        self.velocity_i=[]          # particle velocity
+        self.pos_best_i=[]          # best position individual
+        self.err_best_i=-1          # best error individual
+        self.err_i=-1               # error individual
+
+        for i in range(0,num_dimensions):
+            #print(num_dimensions)
+            self.velocity_i.append(random.uniform(-1,1))
+            self.position_i.append(x0[i])
+
+    # evaluate current fitness
+    def evaluate(self,costFunc):
+        self.err_i=costFunc(self.position_i)
+
+        # check to see if the current position is an individual best
+        if self.err_i < self.err_best_i or self.err_best_i==-1:
+            self.pos_best_i=self.position_i
+            self.err_best_i=self.err_i
+
+    # update new particle velocity
+    def update_velocity(self,pos_best_g):
+        w=0.5       # constant inertia weight (how much to weigh the previous velocity)
+        c1=1        # cognative constant
+        c2=2        # social constant
+
+        for i in range(0,num_dimensions):
+            r1=random.random()
+            r2=random.random()
+
+            vel_cognitive=c1*r1*(self.pos_best_i[i]-self.position_i[i])
+            vel_social=c2*r2*(pos_best_g[i]-self.position_i[i])
+            self.velocity_i[i]=w*self.velocity_i[i]+vel_cognitive+vel_social
+
+    # update the particle position based off new velocity updates
+    def update_position(self,bounds):
+        for i in range(0,num_dimensions):
+            self.position_i[i]=self.position_i[i]+self.velocity_i[i]
+
+            # adjust maximum position if necessary
+            if self.position_i[i]>bounds[i][1]:
+                self.position_i[i]=bounds[i][1]
+
+            # adjust minimum position if neseccary
+            if self.position_i[i] < bounds[i][0]:
+                self.position_i[i]=bounds[i][0]
+                
+
 for withtrain in range(0,20):
     
     layer1_filters = nlayer1_filters
@@ -439,154 +502,83 @@ for withtrain in range(0,20):
     filters3 = np.copy(filters)
     biases3 = np.copy(biases)
     
-    def ensure_bounds(par):
-        new_par = []
-        for index in range(0, len(par)):
-            if(par[index] >= 0.5):
-                new_par.append(1)
-            else:
-                new_par.append(0)
+    def func1(x):
+        filters1 = np.copy(filters)
+        biases1 = np.copy(biases)
+        
+        for i in range(0,layer1_filters):
+            if(x[i] < 0.5):
+                biases1[i] = 0
+                filters1[:, :, :, i] = 0
+        
+        autoencoder.layers[1].set_weights([filters1, biases1])
+
+
+        filters3 = np.copy(filters2)
+        biases3 = np.copy(biases2)
+        
+        for i in range(0,layer1_filters):
+            if(x[i] < 0.5):
+                biases3[i] = 0
+                filters3[:, :, :, i] = 0
+        
+        autoencoder.layers[2].set_weights([filters3, biases3])
+
+        arr = autoencoder.evaluate(test_data, test_label, verbose=1)
+        score_trial = 0.5*arr[1]+0.5*len(x)/np.sum(x)
+
                 
-        return new_par
+        return score_trial
     
-    popsize = 20
-    mutate = 0.5
-    recombination = 0.7
-    population = []
-    for i in range(0,popsize):
-        indv = []
-        for k in range(0, layer1_filters):
-            indv.append(random.randint(0,1))
-        population.append(indv)
-            
-    #--- SOLVE --------------------------------------------+
-    
-    # cycle through each generation (step #2)
-    for i in range(1,10+1):
-        print ('GENERATION:',i)
-    
-        gen_scores = [] # score keeping
-    
-        # cycle through each individual in the population
-        for j in range(0, popsize):
-    
-            #--- MUTATION (step #3.A) ---------------------+
-            
-            # select three random vector index positions [0, popsize), not including current vector (j)
-            canidates = list(range(0,popsize))
-            canidates.remove(j)
-            random_index = random.sample(canidates, 3)
-    
-            x_1 = population[random_index[0]]
-            x_2 = population[random_index[1]]
-            x_3 = population[random_index[2]]
-            x_t = population[j]     # target individual
-    
-            # subtract x3 from x2, and create a new vector (x_diff)
-            x_diff = [x_2_i - x_3_i for x_2_i, x_3_i in zip(x_2, x_3)]
-    
-            # multiply x_diff by the mutation factor (F) and add to x_1
-            v_donor = [x_1_i + mutate * x_diff_i for x_1_i, x_diff_i in zip(x_1, x_diff)]
-            v_donor = ensure_bounds(v_donor)
-    
-            #--- RECOMBINATION (step #3.B) ----------------+
-    
-            v_trial = []
-            for k in range(len(x_t)):
-                crossover = random.random()
-                if crossover <= recombination:
-                    v_trial.append(v_donor[k])
-    
-                else:
-                    v_trial.append(x_t[k])
-                    
-            #--- GREEDY SELECTION (step #3.C) -------------+
-    
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
-            
-            for i in range(0,layer1_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[1].set_weights([filters1, biases1])
-            
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            
-            for i in range(0,layer1_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
-            
-            autoencoder.layers[2].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_trial = 0.5*arr[1]+0.5*len(v_trial)/np.sum(v_trial)
-            
-            #score_trial  = cost_func(v_trial)
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
+    def PSO(costFunc,x0,bounds,num_particles,maxiter):
 
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            for i in range(0,layer1_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[1].set_weights([filters1, biases1])
 
-            for i in range(0,layer1_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
+        global num_dimensions
+        num_dimensions=len(x0)
+        err_best_g=-1                   # best error for group
+        pos_best_g=[]                   # best position for group
+
+        # establish the swarm
+        swarm=[]
+        for i in range(0,num_particles):
+            swarm.append(Particle(x0))
+
+        # begin optimization loop
+        i=0
+        while i < maxiter:
+            #print i,err_best_g
+            # cycle through particles in swarm and evaluate fitness
+            for j in range(0,num_particles):
+                swarm[j].evaluate(costFunc)
+
+                # determine if current particle is the best (globally)
+                if swarm[j].err_i < err_best_g or err_best_g == -1:
+                    pos_best_g=list(swarm[j].position_i)
+                    err_best_g=float(swarm[j].err_i)
+
+            # cycle through swarm and update velocities and position
+            for j in range(0,num_particles):
+                swarm[j].update_velocity(pos_best_g)
+                swarm[j].update_position(bounds)
+            i+=1
+
+        return pos_best_g
+
+    indv = []
+    bounds = []
+    for k in range(0, layer1_filters):
+        indv.append(random.randint(0,1))
+        bounds.append((0,1))
             
-            autoencoder.layers[2].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_target = 0.5*arr[1]+0.5*len(x_t)/np.sum(x_t)
-    
-    
-            #score_target = cost_func(x_t)
-    
-            if score_trial > score_target:
-                population[j] = v_trial
-                gen_scores.append(score_trial)
-                #print '   >',score_trial, v_trial
-    
-            else:
-                #print '   >',score_target, x_t
-                gen_scores.append(score_target)
-    
-        #--- SCORE KEEPING --------------------------------+
-    
-        gen_avg = sum(gen_scores) / popsize                         # current generation avg. fitness
-        gen_best = max(gen_scores) 
-        print(gen_best)                                 # fitness of best individual
-        par1 = population[gen_scores.index(max(gen_scores))]     # solution of best individual
-    
     if(layer1_filters > 32):
-        pass
+        par1 = PSO(func1,indv,bounds,num_particles=15,maxiter=30)
     else:
         par1 = []
         for k in range(0, layer1_filters):
             par1.append(1)
+    
+    par1 = enure_binary(par1)
+
 
     A1 = np.copy(par1)       
     new_num = np.sum(par1)
@@ -610,155 +602,82 @@ for withtrain in range(0,20):
     filters3 = np.copy(filters)
     biases3 = np.copy(biases)
     
-    def ensure_bounds(par):
-        new_par = []
-        for index in range(0, len(par)):
-            if(par[index] >= 0.5):
-                new_par.append(1)
-            else:
-                new_par.append(0)
+    def func1(x):
+        filters1 = np.copy(filters)
+        biases1 = np.copy(biases)
+        
+        for i in range(0,layer2_filters):
+            if(x[i] < 0.5):
+                biases1[i] = 0
+                filters1[:, :, :, i] = 0
+        
+        autoencoder.layers[4].set_weights([filters1, biases1])
+
+
+        filters3 = np.copy(filters2)
+        biases3 = np.copy(biases2)
+        
+        for i in range(0,layer2_filters):
+            if(x[i] < 0.5):
+                biases3[i] = 0
+                filters3[:, :, :, i] = 0
+        
+        autoencoder.layers[5].set_weights([filters3, biases3])
+
+        arr = autoencoder.evaluate(test_data, test_label, verbose=1)
+        score_trial = 0.5*arr[1]+0.5*len(x)/np.sum(x)
+
                 
-        return new_par
+        return score_trial
     
-    popsize = 20
-    mutate = 0.5
-    recombination = 0.7
-    population = []
-    for i in range(0,popsize):
-        indv = []
-        for k in range(0, layer2_filters):
-            indv.append(random.randint(0,1))
-        population.append(indv)
-            
-    #--- SOLVE --------------------------------------------+
-    
-    # cycle through each generation (step #2)
-    for i in range(1,10+1):
-        print ('GENERATION:',i)
-    
-        gen_scores = [] # score keeping
-    
-        # cycle through each individual in the population
-        for j in range(0, popsize):
-    
-            #--- MUTATION (step #3.A) ---------------------+
-            
-            # select three random vector index positions [0, popsize), not including current vector (j)
-            canidates = list(range(0,popsize))
-            canidates.remove(j)
-            random_index = random.sample(canidates, 3)
-    
-            x_1 = population[random_index[0]]
-            x_2 = population[random_index[1]]
-            x_3 = population[random_index[2]]
-            x_t = population[j]     # target individual
-    
-            # subtract x3 from x2, and create a new vector (x_diff)
-            x_diff = [x_2_i - x_3_i for x_2_i, x_3_i in zip(x_2, x_3)]
-    
-            # multiply x_diff by the mutation factor (F) and add to x_1
-            v_donor = [x_1_i + mutate * x_diff_i for x_1_i, x_diff_i in zip(x_1, x_diff)]
-            v_donor = ensure_bounds(v_donor)
-    
-            #--- RECOMBINATION (step #3.B) ----------------+
-    
-            v_trial = []
-            for k in range(len(x_t)):
-                crossover = random.random()
-                if crossover <= recombination:
-                    v_trial.append(v_donor[k])
-    
-                else:
-                    v_trial.append(x_t[k])
-                    
-            #--- GREEDY SELECTION (step #3.C) -------------+
-    
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
-            
-            for i in range(0,layer2_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[4].set_weights([filters1, biases1])
-            
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            
-            for i in range(0,layer2_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
-            
-            autoencoder.layers[5].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_trial = 0.5*arr[1]+0.5*len(v_trial)/np.sum(v_trial)
-            
-            #score_trial  = cost_func(v_trial)
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
+    def PSO(costFunc,x0,bounds,num_particles,maxiter):
 
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            for i in range(0,layer2_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[4].set_weights([filters1, biases1])
 
-            for i in range(0,layer2_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
+        global num_dimensions
+        num_dimensions=len(x0)
+        err_best_g=-1                   # best error for group
+        pos_best_g=[]                   # best position for group
+
+        # establish the swarm
+        swarm=[]
+        for i in range(0,num_particles):
+            swarm.append(Particle(x0))
+
+        # begin optimization loop
+        i=0
+        while i < maxiter:
+            #print i,err_best_g
+            # cycle through particles in swarm and evaluate fitness
+            for j in range(0,num_particles):
+                swarm[j].evaluate(costFunc)
+
+                # determine if current particle is the best (globally)
+                if swarm[j].err_i < err_best_g or err_best_g == -1:
+                    pos_best_g=list(swarm[j].position_i)
+                    err_best_g=float(swarm[j].err_i)
+
+            # cycle through swarm and update velocities and position
+            for j in range(0,num_particles):
+                swarm[j].update_velocity(pos_best_g)
+                swarm[j].update_position(bounds)
+            i+=1
+
+        return pos_best_g
+
+    indv = []
+    bounds = []
+    for k in range(0, layer2_filters):
+        indv.append(random.randint(0,1))
+        bounds.append((0,1))
             
-            autoencoder.layers[5].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_target = 0.5*arr[1]+0.5*len(x_t)/np.sum(x_t)
-    
-    
-            #score_target = cost_func(x_t)
-    
-            if score_trial > score_target:
-                population[j] = v_trial
-                gen_scores.append(score_trial)
-                #print '   >',score_trial, v_trial
-    
-            else:
-                #print '   >',score_target, x_t
-                gen_scores.append(score_target)
-    
-        #--- SCORE KEEPING --------------------------------+
-    
-        gen_avg = sum(gen_scores) / popsize                         # current generation avg. fitness
-        gen_best = max(gen_scores) 
-        print(gen_best)                                 # fitness of best individual
-        par1 = population[gen_scores.index(max(gen_scores))]     # solution of best individual
-    
-    
     if(layer2_filters > 32):
-        pass
+        par1 = PSO(func1,indv,bounds,num_particles=15,maxiter=30)
     else:
         par1 = []
         for k in range(0, layer2_filters):
             par1.append(1)
+    
+    par1 = enure_binary(par1)
 
     A2 = np.copy(par1)       
     new_num = np.sum(par1)
@@ -783,155 +702,82 @@ for withtrain in range(0,20):
     filters3 = np.copy(filters)
     biases3 = np.copy(biases)
     
-    def ensure_bounds(par):
-        new_par = []
-        for index in range(0, len(par)):
-            if(par[index] >= 0.5):
-                new_par.append(1)
-            else:
-                new_par.append(0)
+    def func1(x):
+        filters1 = np.copy(filters)
+        biases1 = np.copy(biases)
+        
+        for i in range(0,layer3_filters):
+            if(x[i] < 0.5):
+                biases1[i] = 0
+                filters1[:, :, :, i] = 0
+        
+        autoencoder.layers[7].set_weights([filters1, biases1])
+
+
+        filters3 = np.copy(filters2)
+        biases3 = np.copy(biases2)
+        
+        for i in range(0,layer3_filters):
+            if(x[i] < 0.5):
+                biases3[i] = 0
+                filters3[:, :, :, i] = 0
+        
+        autoencoder.layers[8].set_weights([filters3, biases3])
+
+        arr = autoencoder.evaluate(test_data, test_label, verbose=1)
+        score_trial = 0.5*arr[1]+0.5*len(x)/np.sum(x)
+
                 
-        return new_par
+        return score_trial
     
-    popsize = 20
-    mutate = 0.5
-    recombination = 0.7
-    population = []
-    for i in range(0,popsize):
-        indv = []
-        for k in range(0, layer3_filters):
-            indv.append(random.randint(0,1))
-        population.append(indv)
-            
-    #--- SOLVE --------------------------------------------+
-    
-    # cycle through each generation (step #2)
-    for i in range(1,10+1):
-        print ('GENERATION:',i)
-    
-        gen_scores = [] # score keeping
-    
-        # cycle through each individual in the population
-        for j in range(0, popsize):
-    
-            #--- MUTATION (step #3.A) ---------------------+
-            
-            # select three random vector index positions [0, popsize), not including current vector (j)
-            canidates = list(range(0,popsize))
-            canidates.remove(j)
-            random_index = random.sample(canidates, 3)
-    
-            x_1 = population[random_index[0]]
-            x_2 = population[random_index[1]]
-            x_3 = population[random_index[2]]
-            x_t = population[j]     # target individual
-    
-            # subtract x3 from x2, and create a new vector (x_diff)
-            x_diff = [x_2_i - x_3_i for x_2_i, x_3_i in zip(x_2, x_3)]
-    
-            # multiply x_diff by the mutation factor (F) and add to x_1
-            v_donor = [x_1_i + mutate * x_diff_i for x_1_i, x_diff_i in zip(x_1, x_diff)]
-            v_donor = ensure_bounds(v_donor)
-    
-            #--- RECOMBINATION (step #3.B) ----------------+
-    
-            v_trial = []
-            for k in range(len(x_t)):
-                crossover = random.random()
-                if crossover <= recombination:
-                    v_trial.append(v_donor[k])
-    
-                else:
-                    v_trial.append(x_t[k])
-                    
-            #--- GREEDY SELECTION (step #3.C) -------------+
-    
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
-            
-            for i in range(0,layer3_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[7].set_weights([filters1, biases1])
-            
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            
-            for i in range(0,layer3_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
-            
-            autoencoder.layers[8].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_trial = 0.5*arr[1]+0.5*len(v_trial)/np.sum(v_trial)
-            
-            #score_trial  = cost_func(v_trial)
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
+    def PSO(costFunc,x0,bounds,num_particles,maxiter):
 
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            for i in range(0,layer3_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[7].set_weights([filters1, biases1])
 
-            for i in range(0,layer3_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
+        global num_dimensions
+        num_dimensions=len(x0)
+        err_best_g=-1                   # best error for group
+        pos_best_g=[]                   # best position for group
+
+        # establish the swarm
+        swarm=[]
+        for i in range(0,num_particles):
+            swarm.append(Particle(x0))
+
+        # begin optimization loop
+        i=0
+        while i < maxiter:
+            #print i,err_best_g
+            # cycle through particles in swarm and evaluate fitness
+            for j in range(0,num_particles):
+                swarm[j].evaluate(costFunc)
+
+                # determine if current particle is the best (globally)
+                if swarm[j].err_i < err_best_g or err_best_g == -1:
+                    pos_best_g=list(swarm[j].position_i)
+                    err_best_g=float(swarm[j].err_i)
+
+            # cycle through swarm and update velocities and position
+            for j in range(0,num_particles):
+                swarm[j].update_velocity(pos_best_g)
+                swarm[j].update_position(bounds)
+            i+=1
+
+        return pos_best_g
+
+    indv = []
+    bounds = []
+    for k in range(0, layer3_filters):
+        indv.append(random.randint(0,1))
+        bounds.append((0,1))
             
-            autoencoder.layers[8].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_target = 0.5*arr[1]+0.5*len(x_t)/np.sum(x_t)
-    
-    
-            #score_target = cost_func(x_t)
-    
-            if score_trial > score_target:
-                population[j] = v_trial
-                gen_scores.append(score_trial)
-                #print '   >',score_trial, v_trial
-    
-            else:
-                #print '   >',score_target, x_t
-                gen_scores.append(score_target)
-    
-        #--- SCORE KEEPING --------------------------------+
-    
-        gen_avg = sum(gen_scores) / popsize                         # current generation avg. fitness
-        gen_best = max(gen_scores) 
-        print(gen_best)                                 # fitness of best individual
-        par1 = population[gen_scores.index(max(gen_scores))]     # solution of best individual
-    
-    
     if(layer3_filters > 32):
-        pass
+        par1 = PSO(func1,indv,bounds,num_particles=15,maxiter=30)
     else:
         par1 = []
         for k in range(0, layer3_filters):
             par1.append(1)
+    
+    par1 = enure_binary(par1)
 
     A3 = np.copy(par1)       
     new_num = np.sum(par1)
@@ -955,155 +801,82 @@ for withtrain in range(0,20):
     filters3 = np.copy(filters)
     biases3 = np.copy(biases)
     
-    def ensure_bounds(par):
-        new_par = []
-        for index in range(0, len(par)):
-            if(par[index] >= 0.5):
-                new_par.append(1)
-            else:
-                new_par.append(0)
+    def func1(x):
+        filters1 = np.copy(filters)
+        biases1 = np.copy(biases)
+        
+        for i in range(0,layer4_filters):
+            if(x[i] < 0.5):
+                biases1[i] = 0
+                filters1[:, :, :, i] = 0
+        
+        autoencoder.layers[10].set_weights([filters1, biases1])
+
+
+        filters3 = np.copy(filters2)
+        biases3 = np.copy(biases2)
+        
+        for i in range(0,layer4_filters):
+            if(x[i] < 0.5):
+                biases3[i] = 0
+                filters3[:, :, :, i] = 0
+        
+        autoencoder.layers[11].set_weights([filters3, biases3])
+
+        arr = autoencoder.evaluate(test_data, test_label, verbose=1)
+        score_trial = 0.5*arr[1]+0.5*len(x)/np.sum(x)
+
                 
-        return new_par
+        return score_trial
     
-    popsize = 20
-    mutate = 0.5
-    recombination = 0.7
-    population = []
-    for i in range(0,popsize):
-        indv = []
-        for k in range(0, layer4_filters):
-            indv.append(random.randint(0,1))
-        population.append(indv)
-            
-    #--- SOLVE --------------------------------------------+
-    
-    # cycle through each generation (step #2)
-    for i in range(1,10+1):
-        print ('GENERATION:',i)
-    
-        gen_scores = [] # score keeping
-    
-        # cycle through each individual in the population
-        for j in range(0, popsize):
-    
-            #--- MUTATION (step #3.A) ---------------------+
-            
-            # select three random vector index positions [0, popsize), not including current vector (j)
-            canidates = list(range(0,popsize))
-            canidates.remove(j)
-            random_index = random.sample(canidates, 3)
-    
-            x_1 = population[random_index[0]]
-            x_2 = population[random_index[1]]
-            x_3 = population[random_index[2]]
-            x_t = population[j]     # target individual
-    
-            # subtract x3 from x2, and create a new vector (x_diff)
-            x_diff = [x_2_i - x_3_i for x_2_i, x_3_i in zip(x_2, x_3)]
-    
-            # multiply x_diff by the mutation factor (F) and add to x_1
-            v_donor = [x_1_i + mutate * x_diff_i for x_1_i, x_diff_i in zip(x_1, x_diff)]
-            v_donor = ensure_bounds(v_donor)
-    
-            #--- RECOMBINATION (step #3.B) ----------------+
-    
-            v_trial = []
-            for k in range(len(x_t)):
-                crossover = random.random()
-                if crossover <= recombination:
-                    v_trial.append(v_donor[k])
-    
-                else:
-                    v_trial.append(x_t[k])
-                    
-            #--- GREEDY SELECTION (step #3.C) -------------+
-    
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
-            
-            for i in range(0,layer4_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[10].set_weights([filters1, biases1])
-            
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            
-            for i in range(0,layer4_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
-            
-            autoencoder.layers[11].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_trial = 0.5*arr[1]+0.5*len(v_trial)/np.sum(v_trial)
-            
-            #score_trial  = cost_func(v_trial)
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
+    def PSO(costFunc,x0,bounds,num_particles,maxiter):
 
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            for i in range(0,layer4_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[10].set_weights([filters1, biases1])
 
-            for i in range(0,layer4_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
+        global num_dimensions
+        num_dimensions=len(x0)
+        err_best_g=-1                   # best error for group
+        pos_best_g=[]                   # best position for group
+
+        # establish the swarm
+        swarm=[]
+        for i in range(0,num_particles):
+            swarm.append(Particle(x0))
+
+        # begin optimization loop
+        i=0
+        while i < maxiter:
+            #print i,err_best_g
+            # cycle through particles in swarm and evaluate fitness
+            for j in range(0,num_particles):
+                swarm[j].evaluate(costFunc)
+
+                # determine if current particle is the best (globally)
+                if swarm[j].err_i < err_best_g or err_best_g == -1:
+                    pos_best_g=list(swarm[j].position_i)
+                    err_best_g=float(swarm[j].err_i)
+
+            # cycle through swarm and update velocities and position
+            for j in range(0,num_particles):
+                swarm[j].update_velocity(pos_best_g)
+                swarm[j].update_position(bounds)
+            i+=1
+
+        return pos_best_g
+
+    indv = []
+    bounds = []
+    for k in range(0, layer4_filters):
+        indv.append(random.randint(0,1))
+        bounds.append((0,1))
             
-            autoencoder.layers[11].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_target = 0.5*arr[1]+0.5*len(x_t)/np.sum(x_t)
-    
-    
-            #score_target = cost_func(x_t)
-    
-            if score_trial > score_target:
-                population[j] = v_trial
-                gen_scores.append(score_trial)
-                #print '   >',score_trial, v_trial
-    
-            else:
-                #print '   >',score_target, x_t
-                gen_scores.append(score_target)
-    
-        #--- SCORE KEEPING --------------------------------+
-    
-        gen_avg = sum(gen_scores) / popsize                         # current generation avg. fitness
-        gen_best = max(gen_scores) 
-        print(gen_best)                                 # fitness of best individual
-        par1 = population[gen_scores.index(max(gen_scores))]     # solution of best individual
-    
-    
     if(layer4_filters > 32):
-        pass
+        par1 = PSO(func1,indv,bounds,num_particles=15,maxiter=30)
     else:
         par1 = []
         for k in range(0, layer4_filters):
             par1.append(1)
+    
+    par1 = enure_binary(par1)
 
     A4 = np.copy(par1)       
     new_num = np.sum(par1)
@@ -1128,155 +901,82 @@ for withtrain in range(0,20):
     filters3 = np.copy(filters)
     biases3 = np.copy(biases)
     
-    def ensure_bounds(par):
-        new_par = []
-        for index in range(0, len(par)):
-            if(par[index] >= 0.5):
-                new_par.append(1)
-            else:
-                new_par.append(0)
+    def func1(x):
+        filters1 = np.copy(filters)
+        biases1 = np.copy(biases)
+        
+        for i in range(0,layer5_filters):
+            if(x[i] < 0.5):
+                biases1[i] = 0
+                filters1[:, :, :, i] = 0
+        
+        autoencoder.layers[14].set_weights([filters1, biases1])
+
+
+        filters3 = np.copy(filters2)
+        biases3 = np.copy(biases2)
+        
+        for i in range(0,layer5_filters):
+            if(x[i] < 0.5):
+                biases3[i] = 0
+                filters3[:, :, :, i] = 0
+        
+        autoencoder.layers[15].set_weights([filters3, biases3])
+
+        arr = autoencoder.evaluate(test_data, test_label, verbose=1)
+        score_trial = 0.5*arr[1]+0.5*len(x)/np.sum(x)
+
                 
-        return new_par
+        return score_trial
     
-    popsize = 20
-    mutate = 0.5
-    recombination = 0.7
-    population = []
-    for i in range(0,popsize):
-        indv = []
-        for k in range(0, layer5_filters):
-            indv.append(random.randint(0,1))
-        population.append(indv)
-            
-    #--- SOLVE --------------------------------------------+
-    
-    # cycle through each generation (step #2)
-    for i in range(1,10+1):
-        print ('GENERATION:',i)
-    
-        gen_scores = [] # score keeping
-    
-        # cycle through each individual in the population
-        for j in range(0, popsize):
-    
-            #--- MUTATION (step #3.A) ---------------------+
-            
-            # select three random vector index positions [0, popsize), not including current vector (j)
-            canidates = list(range(0,popsize))
-            canidates.remove(j)
-            random_index = random.sample(canidates, 3)
-    
-            x_1 = population[random_index[0]]
-            x_2 = population[random_index[1]]
-            x_3 = population[random_index[2]]
-            x_t = population[j]     # target individual
-    
-            # subtract x3 from x2, and create a new vector (x_diff)
-            x_diff = [x_2_i - x_3_i for x_2_i, x_3_i in zip(x_2, x_3)]
-    
-            # multiply x_diff by the mutation factor (F) and add to x_1
-            v_donor = [x_1_i + mutate * x_diff_i for x_1_i, x_diff_i in zip(x_1, x_diff)]
-            v_donor = ensure_bounds(v_donor)
-    
-            #--- RECOMBINATION (step #3.B) ----------------+
-    
-            v_trial = []
-            for k in range(len(x_t)):
-                crossover = random.random()
-                if crossover <= recombination:
-                    v_trial.append(v_donor[k])
-    
-                else:
-                    v_trial.append(x_t[k])
-                    
-            #--- GREEDY SELECTION (step #3.C) -------------+
-    
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
-            
-            for i in range(0,layer5_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[14].set_weights([filters1, biases1])
-            
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            
-            for i in range(0,layer5_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(v_trial[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
-            
-            autoencoder.layers[15].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_trial = 0.5*arr[1]+0.5*len(v_trial)/np.sum(v_trial)
-            
-            #score_trial  = cost_func(v_trial)
-            filters1 = np.copy(filters)
-            biases1 = np.copy(biases)
+    def PSO(costFunc,x0,bounds,num_particles,maxiter):
 
-            filters3 = np.copy(filters2)
-            biases3 = np.copy(biases2)
-            for i in range(0,layer5_filters):
-                f = filters[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases1[i] = 0
-                    filters1[:, :, :, i] = 0
-            
-            autoencoder.layers[14].set_weights([filters1, biases1])
 
-            for i in range(0,layer5_filters):
-                f = filters2[:, :, :, i]
-                #for j in range(3):
-                    #if(child[i] == 0):
-                        #filters1[:, :, :, i][:,:,j] = 0
-                if(x_t[i] == 0):
-                    biases3[i] = 0
-                    filters3[:, :, :, i] = 0
+        global num_dimensions
+        num_dimensions=len(x0)
+        err_best_g=-1                   # best error for group
+        pos_best_g=[]                   # best position for group
+
+        # establish the swarm
+        swarm=[]
+        for i in range(0,num_particles):
+            swarm.append(Particle(x0))
+
+        # begin optimization loop
+        i=0
+        while i < maxiter:
+            #print i,err_best_g
+            # cycle through particles in swarm and evaluate fitness
+            for j in range(0,num_particles):
+                swarm[j].evaluate(costFunc)
+
+                # determine if current particle is the best (globally)
+                if swarm[j].err_i < err_best_g or err_best_g == -1:
+                    pos_best_g=list(swarm[j].position_i)
+                    err_best_g=float(swarm[j].err_i)
+
+            # cycle through swarm and update velocities and position
+            for j in range(0,num_particles):
+                swarm[j].update_velocity(pos_best_g)
+                swarm[j].update_position(bounds)
+            i+=1
+
+        return pos_best_g
+
+    indv = []
+    bounds = []
+    for k in range(0, layer5_filters):
+        indv.append(random.randint(0,1))
+        bounds.append((0,1))
             
-            autoencoder.layers[15].set_weights([filters3, biases3])
-            arr = autoencoder.evaluate(test_data, test_label, verbose=1)
-            score_target = 0.5*arr[1]+0.5*len(x_t)/np.sum(x_t)
-    
-    
-            #score_target = cost_func(x_t)
-    
-            if score_trial > score_target:
-                population[j] = v_trial
-                gen_scores.append(score_trial)
-                #print '   >',score_trial, v_trial
-    
-            else:
-                #print '   >',score_target, x_t
-                gen_scores.append(score_target)
-    
-        #--- SCORE KEEPING --------------------------------+
-    
-        gen_avg = sum(gen_scores) / popsize                         # current generation avg. fitness
-        gen_best = max(gen_scores) 
-        print(gen_best)                                 # fitness of best individual
-        par1 = population[gen_scores.index(max(gen_scores))]     # solution of best individual
-    
-    
     if(layer5_filters > 32):
-        pass
+        par1 = PSO(func1,indv,bounds,num_particles=15,maxiter=30)
     else:
         par1 = []
         for k in range(0, layer5_filters):
             par1.append(1)
+    
+    par1 = enure_binary(par1)
 
     A5 = np.copy(par1)       
     new_num = np.sum(par1)
